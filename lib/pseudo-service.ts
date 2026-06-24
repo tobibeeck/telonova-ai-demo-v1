@@ -22,9 +22,19 @@ Erlaubt:
 - EMAIL, TELEFON, IBAN, ADRESSE, DATUM, ORG (Firmen mit Rechtsform)
 
 Strikt NICHT markieren:
+- Begrüßungen und Smalltalk: "Hallo", "Servus", "Moin", "Guten Tag"
+- Fragen ohne Namen: "Wer bist du?", "Wie geht es dir?", "Was kannst du?"
 - Pronomen und Anreden: du, dir, dich, dein, Sie, Ihnen, Herr, Frau (ohne folgenden Namen)
 - Alltagswörter, Verben, Artikel, Füllwörter
-- Generische Begriffe ohne Identifikationswert
+- Ganze Sätze oder Satzteile – nur das konkrete Datum/Name/Email/etc.
+
+Beispiele (entities = []):
+- "Hallo, wer bist du?" → []
+- "Servus" → []
+- "Wie kann ich helfen?" → []
+
+Beispiel mit Entity:
+- "Termin mit Max Mustermann am 12.03.2025" → PERSON: "Max Mustermann", DATUM: "12.03.2025"
 
 Antwote NUR mit validem JSON:
 {"entities":[{"text":"...","type":"PERSON|DATUM|TELEFON|EMAIL|IBAN|ADRESSE|ORG"}]}
@@ -39,7 +49,40 @@ const BLOCKED_TERMS = new Set([
   'herr', 'frau', 'herrn', 'frauen', 'geehrte', 'geehrter', 'hallo', 'bitte', 'danke',
   'ja', 'nein', 'und', 'oder', 'aber', 'wenn', 'dass', 'weil', 'also', 'noch', 'schon',
   'nicht', 'auch', 'nur', 'sehr', 'gern', 'gerne', 'liebe', 'lieber', 'beste', 'bester',
+  'wer', 'was', 'wann', 'wo', 'wie', 'warum', 'womit', 'wofür', 'weshalb',
+  'bist', 'bin', 'ist', 'sind', 'war', 'waren', 'habe', 'hast', 'hat', 'haben',
+  'servus', 'moin', 'grüß', 'gott', 'tschüss', 'ciao', 'hello', 'hey', 'hi',
+  'guten', 'tag', 'morgen', 'abend', 'nacht', 'willkommen', 'danke', 'vielen', 'dank',
+  'können', 'kannst', 'kann', 'können', 'helfen', 'helfe', 'hilf', 'geht', 'gehen',
 ])
+
+const GREETING_OR_QUESTION =
+  /^(hallo|servus|moin|hi|hey|guten\s+(tag|morgen|abend)|grüß\s+gott)[\s,!.?]*$|^(wer|was|wo|wann|wie|warum)\b/i
+
+function cleanToken(word: string): string {
+  return word.replace(/^[,.!?;:]+|[,.!?;:]+$/g, '').toLowerCase()
+}
+
+function looksLikePersonName(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed || GREETING_OR_QUESTION.test(trimmed)) return false
+  if (/[?!]/.test(trimmed)) return false
+
+  const words = trimmed.split(/\s+/).filter(Boolean)
+  if (words.every(w => BLOCKED_TERMS.has(cleanToken(w)))) return false
+
+  const nameTokens = words.filter(w => {
+    const clean = w.replace(/[,.!?;:]/g, '')
+    if (!clean) return false
+    if (BLOCKED_TERMS.has(clean.toLowerCase())) return false
+    if (/^(Dr|Prof|Herr|Frau|Hr|Fr)\.?$/i.test(clean)) return false
+    return /^[A-ZÄÖÜ][a-zäöüß-]+$/.test(clean) || /^[A-ZÄÖÜ]{2,}$/.test(clean)
+  })
+
+  if (nameTokens.length === 0) return false
+  if (words.length === 1) return nameTokens.length === 1
+  return nameTokens.length >= 1 && words.length <= 6
+}
 
 function shouldSkipEntity(text: string, type: PseudoReplacement['type']): boolean {
   const trimmed = text.trim()
@@ -56,6 +99,7 @@ function shouldSkipEntity(text: string, type: PseudoReplacement['type']): boolea
     if (trimmed.length < 3) return true
     if (/^(du|dir|dich|sie|ihr|ihm|ihn|es|wir|uns)$/i.test(trimmed)) return true
     if (words.length === 1 && !/^[A-ZÄÖÜ]/.test(trimmed)) return true
+    if (!looksLikePersonName(trimmed)) return true
   }
 
   return false
@@ -126,7 +170,11 @@ export async function pseudonymizeText(
     )
   }
 
-  const prompt = `Extrahiere NUR echte personenbezogene/sensible Daten (Namen, E-Mail, Telefon, IBAN, Adresse, Datum, Firma). Keine Pronomen wie "du"/"dir". Text:\n\n${text}`
+  const prompt = `Extrahiere NUR echte personenbezogene/sensible Daten (Namen, E-Mail, Telefon, IBAN, Adresse, Datum, Firma).
+Keine Begrüßungen, keine Fragen, keine Pronomen wie "du"/"dir"/"wer bist du".
+Markiere niemals ganze Sätze – nur das konkrete Stück (z.B. nur "Max Mustermann", nicht den ganzen Satz).
+
+Text:\n\n${text}`
   const llmResult = await generateJson<LlmResponse>(prompt, SYSTEM_PROMPT)
   const entities = llmResult.entities || []
 

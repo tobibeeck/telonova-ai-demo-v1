@@ -22,7 +22,7 @@ export async function generateJson<T>(prompt: string, system?: string): Promise<
       system,
       stream: false,
       format: 'json',
-      options: { temperature: 0.1, num_predict: 4096 },
+      options: { temperature: 0.1, num_predict: 512 },
     }),
     signal: AbortSignal.timeout(120000),
   })

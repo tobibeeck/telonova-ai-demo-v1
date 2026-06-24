@@ -1,0 +1,9 @@
+# Production override: app on port 80 (http://172.20.20.69/)
+# !override replaces merged port lists from docker-compose.yml (otherwise 80 + 3000 both bind)
+services:
+  app:
+    ports: !override
+      - "80:3000"
+
+  ollama:
+    ports: !override []
