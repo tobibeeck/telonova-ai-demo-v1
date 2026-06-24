@@ -17,11 +17,10 @@ services:
       OLLAMA_BASE_URL: http://ollama:11434
       DATABASE_PATH: /app/data/telonova.db
     volumes:
-      - app_data:/app/data
+      - ./data:/app/data
     depends_on:
       - ollama
     restart: unless-stopped
 
 volumes:
   ollama_data:
-  app_data:

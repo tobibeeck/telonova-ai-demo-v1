@@ -126,6 +126,11 @@ def main() -> int:
     compose = (
         f"{SUDO} docker compose -f docker-compose.yml -f docker-compose.prod.yml"
     )
+    run(
+        client,
+        f"{SUDO} docker run --rm -v telonova_app_data:/from:ro -v {REMOTE_DIR}/data:/to "
+        f"alpine sh -c 'cp -an /from/. /to/ 2>/dev/null || true'",
+    )
     run(client, f"cd {REMOTE_DIR} && {compose} down || true")
     code, _, _ = run(client, f"cd {REMOTE_DIR} && {compose} up -d --build", timeout=1800)
     if code != 0:
