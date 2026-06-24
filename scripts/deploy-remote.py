@@ -89,16 +89,17 @@ def main() -> int:
     if "MISSING" in _:
         run(client, f"sudo mkdir -p {REMOTE_DIR} && sudo chown {USER}:{USER} {REMOTE_DIR}")
 
-    code, out, _ = run(client, f"test -d {REMOTE_DIR}/.git && echo GIT || echo NOGIT")
-    if "NOGIT" in out:
-        run(client, f"git clone {REPO} {REMOTE_DIR}")
-    else:
-        run(client, f"cd {REMOTE_DIR} && git fetch origin && git reset --hard origin/main")
-
     run(client, "git config --global --add safe.directory /opt/telonova || true")
     run(client, f"{SUDO} chown -R {USER}:{USER} {REMOTE_DIR} || true")
     run(client, f"{SUDO} usermod -aG docker {USER} || true")
     run(client, f"mkdir -p {REMOTE_DIR}/data")
+
+    code, out, _ = run(client, f"test -d {REMOTE_DIR}/.git && echo GIT || echo NOGIT")
+    if "NOGIT" not in out:
+        run(client, f"cd {REMOTE_DIR} && git fetch origin && git reset --hard origin/main")
+    else:
+        run(client, f"git clone {REPO} {REMOTE_DIR}")
+
     run(client, f"{SUDO} chown -R 1001:1001 {REMOTE_DIR}/data")
     run(client, f"{SUDO} chmod -R u+rwX,g+rwX {REMOTE_DIR}/data")
 
@@ -111,8 +112,22 @@ def main() -> int:
 
     local_gcp = root / "data" / "gcp-service-account.json"
     if local_gcp.exists():
-        sftp.put(str(local_gcp), f"{REMOTE_DIR}/data/gcp-service-account.json")
-        print("Uploaded gcp-service-account.json")
+        code, out, _ = run(
+            client,
+            f"test -w {REMOTE_DIR}/data && echo DATA_WRITABLE || echo DATA_READONLY",
+        )
+        if "DATA_WRITABLE" in out:
+            sftp.put(str(local_gcp), f"{REMOTE_DIR}/data/gcp-service-account.json")
+            print("Uploaded gcp-service-account.json")
+        else:
+            code, out, _ = run(
+                client,
+                f"test -f {REMOTE_DIR}/data/gcp-service-account.json && echo GCP_OK || echo GCP_MISSING",
+            )
+            if "GCP_OK" in out:
+                print("Skipped GCP upload (data dir not writable, existing file kept)")
+            else:
+                print("WARNING: cannot upload gcp-service-account.json", file=sys.stderr)
     else:
         code, out, _ = run(
             client,
