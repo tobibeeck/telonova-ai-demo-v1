@@ -1,7 +1,7 @@
 'use client'
 
 import { motion, AnimatePresence } from 'framer-motion'
-import { Shield, Cpu, Lock } from 'lucide-react'
+import { Shield, Lock } from 'lucide-react'
 import type { PseudonymizationResult, PseudoReplacement } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -46,11 +46,11 @@ function AnalyzingState() {
   return (
     <div className="flex items-center gap-3">
       <div className="w-7 h-7 rounded-lg bg-model-gpt/20 flex items-center justify-center flex-shrink-0">
-        <Cpu className="w-3.5 h-3.5 text-model-gpt animate-pulse" />
+        <Shield className="w-3.5 h-3.5 text-model-gpt animate-pulse" />
       </div>
       <div>
         <div className="flex items-center gap-2">
-          <p className="text-xs font-medium text-white">Llama 3.2 analysiert lokale Daten…</p>
+          <p className="text-xs font-medium text-white">Nachricht wird pseudonymisiert…</p>
           <span className="text-xs text-gray-500 bg-white/5 px-1.5 py-0.5 rounded">lokal · kein Upload</span>
         </div>
         <div className="flex items-center gap-1 mt-1.5">
@@ -79,7 +79,7 @@ function ResultState({ result }: { result: PseudonymizationResult }) {
           <p className="text-xs font-medium text-white">
             {result.replacements.length} personenbezogene Angabe{result.replacements.length !== 1 ? 'n' : ''} pseudonymisiert
           </p>
-          <span className="text-xs text-gray-500">via Llama 3.2 (lokal)</span>
+          <span className="text-xs text-gray-500">lokal verarbeitet</span>
         </div>
       </div>
       <div className="flex flex-wrap gap-2">

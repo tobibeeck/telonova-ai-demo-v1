@@ -5,7 +5,7 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 
 export const metadata: Metadata = {
-  title: 'TelonovaAI – DSGVO-konform',
+  title: 'teloNova AI – DSGVO-konform',
   description: 'KI-Assistent nach europäischem Datenschutzrecht',
 }
 

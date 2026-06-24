@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import Image from 'next/image'
-import { Plus, MessageSquare, ChevronLeft, Shield, Database, BookOpen } from 'lucide-react'
+import Link from 'next/link'
+import { Plus, MessageSquare, ChevronLeft, Shield, Database, BookOpen, Eye, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Conversation } from '@/lib/types'
 import KnowledgeUpload from './KnowledgeUpload'
@@ -15,6 +16,7 @@ interface Props {
   currentId: string | null
   onSelectConversation: (id: string) => void
   onNewConversation: () => void
+  onDeleteConversation: (id: string) => void
   useKnowledge: boolean
   onToggleKnowledge: (v: boolean) => void
 }
@@ -26,6 +28,7 @@ export default function Sidebar({
   currentId,
   onSelectConversation,
   onNewConversation,
+  onDeleteConversation,
   useKnowledge,
   onToggleKnowledge,
 }: Props) {
@@ -79,19 +82,34 @@ export default function Sidebar({
                   <>
                     <p className="text-xs text-gray-500 px-2 py-2 uppercase tracking-wider">Verlauf</p>
                     {conversations.map(conv => (
-                      <button
+                      <div
                         key={conv.id}
-                        onClick={() => onSelectConversation(conv.id)}
                         className={cn(
-                          'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors group',
-                          currentId === conv.id
-                            ? 'bg-white/15 text-white'
-                            : 'text-gray-400 hover:bg-white/10 hover:text-white'
+                          'flex items-center gap-1 rounded-lg group',
+                          currentId === conv.id ? 'bg-white/15' : 'hover:bg-white/10'
                         )}
                       >
-                        <MessageSquare className="w-3.5 h-3.5 flex-shrink-0 opacity-60" />
-                        <span className="truncate flex-1">{conv.title}</span>
-                      </button>
+                        <button
+                          onClick={() => onSelectConversation(conv.id)}
+                          className={cn(
+                            'flex-1 flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors min-w-0',
+                            currentId === conv.id ? 'text-white' : 'text-gray-400 group-hover:text-white'
+                          )}
+                        >
+                          <MessageSquare className="w-3.5 h-3.5 flex-shrink-0 opacity-60" />
+                          <span className="truncate flex-1">{conv.title}</span>
+                        </button>
+                        <button
+                          onClick={e => {
+                            e.stopPropagation()
+                            onDeleteConversation(conv.id)
+                          }}
+                          className="p-1.5 mr-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-all flex-shrink-0"
+                          title="Chat löschen"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     ))}
                   </>
                 )}
@@ -132,7 +150,14 @@ export default function Sidebar({
               </div>
 
               {/* DSGVO Badge */}
-              <div className="px-3 py-3 border-t border-border">
+              <div className="px-3 py-3 border-t border-border space-y-2">
+                <Link
+                  href="/audit"
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-white/10 text-sm text-gray-400 hover:text-white transition-colors"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>API-Inspektion</span>
+                </Link>
                 <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-model-gpt/10 border border-model-gpt/20">
                   <Shield className="w-3.5 h-3.5 text-model-gpt flex-shrink-0" />
                   <div>

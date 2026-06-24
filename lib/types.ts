@@ -48,6 +48,9 @@ export interface Message {
   timestamp: Date
   pseudonymized?: boolean
   replacementsCount?: number
+  replacements?: PseudoReplacement[]
+  contentSent?: string
+  contentOriginal?: string
 }
 
 export interface Conversation {
@@ -56,7 +59,10 @@ export interface Conversation {
   messages: Message[]
   createdAt: Date
   model: ModelId
+  useCase?: string
 }
+
+export type UseCaseId = 'allgemein' | 'anwalt' | 'arzt' | 'notar'
 
 export interface PseudoReplacement {
   token: string

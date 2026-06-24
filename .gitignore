@@ -6,3 +6,8 @@ node_modules/
 .DS_Store
 *.ps1
 tsconfig.tsbuildinfo
+data/*
+!data/.gitkeep
+*.db
+*.db-wal
+*.db-shm

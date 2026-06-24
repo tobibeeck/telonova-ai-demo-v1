@@ -29,6 +29,12 @@
     "uuid": "^10.0.0",
     "@types/uuid": "^10.0.0",
     "clsx": "^2.1.1",
-    "tailwind-merge": "^2.4.0"
+    "tailwind-merge": "^2.4.0",
+    "better-sqlite3": "^11.7.0",
+    "@types/better-sqlite3": "^7.6.12",
+    "@google-cloud/vertexai": "^1.9.3"
+  },
+  "allowScripts": {
+    "better-sqlite3@11.10.0": true
   }
 }

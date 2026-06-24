@@ -3,7 +3,7 @@
 const nextConfig = {
   output: 'standalone',
   experimental: {
-    serverComponentsExternalPackages: ['pdf-parse'],
+    serverComponentsExternalPackages: ['pdf-parse', 'better-sqlite3', '@google-cloud/vertexai'],
   },
 }
 

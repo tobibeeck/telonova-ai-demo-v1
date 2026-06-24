@@ -3,19 +3,27 @@
 import { useEffect, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { User, Shield } from 'lucide-react'
-import type { Message, ModelId } from '@/lib/types'
+import { User, ArrowRight, ArrowLeft } from 'lucide-react'
+import type { Message, ModelId, PseudoReplacement } from '@/lib/types'
 import { MODELS } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import HighlightedPseudoText from '@/components/pseudonymization/HighlightedPseudoText'
 
 interface Props {
   messages: Message[]
   isLoading: boolean
   streamingContent: string
   selectedModel: ModelId
+  streamingReplacements?: PseudoReplacement[]
 }
 
-export default function MessageList({ messages, isLoading, streamingContent, selectedModel }: Props) {
+export default function MessageList({
+  messages,
+  isLoading,
+  streamingContent,
+  selectedModel,
+  streamingReplacements,
+}: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -28,12 +36,14 @@ export default function MessageList({ messages, isLoading, streamingContent, sel
         <MessageRow key={msg.id} message={msg} />
       ))}
 
-      {/* Streaming message */}
       {isLoading && streamingContent && (
-        <StreamingRow content={streamingContent} model={selectedModel} />
+        <StreamingRow
+          content={streamingContent}
+          model={selectedModel}
+          replacements={streamingReplacements}
+        />
       )}
 
-      {/* Loading indicator (before first token) */}
       {isLoading && !streamingContent && (
         <div className="flex items-start gap-4">
           <ModelAvatar model={selectedModel} />
@@ -50,13 +60,43 @@ export default function MessageList({ messages, isLoading, streamingContent, sel
   )
 }
 
+function PseudoLegend({ direction }: { direction: 'out' | 'in' }) {
+  return (
+    <p className="text-[10px] text-gray-500 mb-1.5 flex items-center gap-1">
+      {direction === 'out' ? (
+        <>
+          <ArrowRight className="w-3 h-3 text-amber-400/70" />
+          <span>Markiert = vor API-Versand pseudonymisiert</span>
+        </>
+      ) : (
+        <>
+          <ArrowLeft className="w-3 h-3 text-emerald-400/70" />
+          <span>Markiert = aus API-Antwort zurückübersetzt</span>
+        </>
+      )}
+    </p>
+  )
+}
+
 function MessageRow({ message }: { message: Message }) {
   if (message.role === 'user') {
+    const hasPseudo = (message.replacements?.length || 0) > 0
     return (
       <div className="flex justify-end">
         <div className="max-w-[80%] flex items-start gap-3">
           <div className="bg-[#2f2f2f] rounded-2xl rounded-tr-sm px-4 py-3">
-            <p className="text-sm text-gray-100 whitespace-pre-wrap leading-relaxed">{message.content}</p>
+            {hasPseudo && <PseudoLegend direction="out" />}
+            {hasPseudo ? (
+              <p className="text-sm text-gray-100">
+                <HighlightedPseudoText
+                  text={message.content}
+                  replacements={message.replacements}
+                  mode="outgoing"
+                />
+              </p>
+            ) : (
+              <p className="text-sm text-gray-100 whitespace-pre-wrap leading-relaxed">{message.content}</p>
+            )}
           </div>
           <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0 mt-0.5">
             <User className="w-4 h-4 text-gray-300" />
@@ -67,6 +107,7 @@ function MessageRow({ message }: { message: Message }) {
   }
 
   const model = message.model ? MODELS.find(m => m.id === message.model) : null
+  const hasRestored = (message.replacements?.length || 0) > 0
 
   return (
     <div className="flex items-start gap-4 animate-fade-in">
@@ -75,35 +116,55 @@ function MessageRow({ message }: { message: Message }) {
         {model && (
           <div className="flex items-center gap-2 mb-2">
             <span className={cn('text-xs font-medium', model.color)}>{model.name}</span>
-            <span className="text-xs text-gray-600">{model.badge}</span>
-            {message.pseudonymized && (
-              <div className="flex items-center gap-1 text-xs text-gray-500">
-                <Shield className="w-3 h-3" />
-                <span>Pseudonymisiert</span>
-              </div>
-            )}
           </div>
         )}
-        <div className="prose-chat text-sm text-gray-100">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-        </div>
+        {hasRestored ? (
+          <div className="text-sm text-gray-100">
+            <PseudoLegend direction="in" />
+            <HighlightedPseudoText
+              text={message.content}
+              replacements={message.replacements}
+              mode="incoming"
+            />
+          </div>
+        ) : (
+          <div className="prose-chat text-sm text-gray-100">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
-function StreamingRow({ content, model }: { content: string; model: ModelId }) {
+function StreamingRow({
+  content,
+  model,
+  replacements,
+}: {
+  content: string
+  model: ModelId
+  replacements?: PseudoReplacement[]
+}) {
   const m = MODELS.find(m => m.id === model)!
+  const hasTokens = (replacements?.length || 0) > 0
+
   return (
     <div className="flex items-start gap-4">
       <ModelAvatar model={model} />
       <div className="flex-1 min-w-0 pt-0.5">
         <div className="flex items-center gap-2 mb-2">
           <span className={cn('text-xs font-medium', m.color)}>{m.name}</span>
-          <span className="text-xs text-gray-600">{m.badge}</span>
         </div>
-        <div className="prose-chat text-sm text-gray-100 streaming-cursor">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+        <div className="text-sm text-gray-100 streaming-cursor">
+          {hasTokens ? (
+            <>
+              <p className="text-[10px] text-gray-500 mb-1.5">API-Antwort (noch mit Tokens)…</p>
+              <HighlightedPseudoText text={content} replacements={replacements} mode="tokens" />
+            </>
+          ) : (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          )}
         </div>
       </div>
     </div>

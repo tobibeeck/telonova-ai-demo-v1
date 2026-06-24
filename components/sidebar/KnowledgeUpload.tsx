@@ -14,6 +14,7 @@ export default function KnowledgeUpload({ onClose }: Props) {
   const [isDragging, setIsDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadedId, setUploadedId] = useState<string | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/knowledge')
@@ -24,11 +25,13 @@ export default function KnowledgeUpload({ onClose }: Props) {
   const handleFile = useCallback(async (file: File) => {
     setUploading(true)
     setUploadedId(null)
+    setUploadError(null)
     const formData = new FormData()
     formData.append('file', file)
     const res = await fetch('/api/knowledge', { method: 'POST', body: formData })
     const data = await res.json()
     if (data.error) {
+      setUploadError(data.error)
       setUploading(false)
       return
     }
@@ -107,6 +110,12 @@ export default function KnowledgeUpload({ onClose }: Props) {
               </div>
             )}
           </label>
+
+          {uploadError && (
+            <p className="mt-3 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+              {uploadError}
+            </p>
+          )}
 
           {/* Document list */}
           {documents.length > 0 && (

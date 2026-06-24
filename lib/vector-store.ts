@@ -1,14 +1,14 @@
+import { v4 as uuidv4 } from 'uuid'
+import { getDb } from './db'
 import type { KnowledgeDocument } from './types'
 
-interface Chunk {
-  docId: string
-  docName: string
+interface ChunkRow {
+  id: string
+  doc_id: string
+  doc_name: string
   text: string
-  tfIdf: Record<string, number>
+  tfidf_json: string
 }
-
-const documents: KnowledgeDocument[] = []
-const chunks: Chunk[] = []
 
 function tokenize(text: string): string[] {
   return text
@@ -58,34 +58,51 @@ function chunkText(text: string, maxChars = 500): string[] {
 
 export function addDocument(id: string, name: string, content: string): KnowledgeDocument {
   const textChunks = chunkText(content)
+  const uploadedAt = new Date().toISOString()
+  const db = getDb()
 
   const doc: KnowledgeDocument = {
     id,
     name,
     content,
     size: content.length,
-    uploadedAt: new Date(),
+    uploadedAt: new Date(uploadedAt),
     chunks: textChunks.length,
   }
-  documents.push(doc)
+
+  db.prepare(
+    `INSERT INTO knowledge_documents (id, name, content_pseudonymized, size, chunks, uploaded_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(id, name, content, content.length, textChunks.length, uploadedAt)
+
+  const insertChunk = db.prepare(
+    `INSERT INTO knowledge_chunks (id, doc_id, doc_name, text, tfidf_json) VALUES (?, ?, ?, ?, ?)`
+  )
 
   textChunks.forEach(chunk => {
     const tokens = tokenize(chunk)
-    chunks.push({ docId: id, docName: name, text: chunk, tfIdf: buildTfIdf(tokens) })
+    insertChunk.run(uuidv4(), id, name, chunk, JSON.stringify(buildTfIdf(tokens)))
   })
 
   return doc
 }
 
-export function searchKnowledge(query: string, topK = 3): Array<{ text: string; docName: string; score: number }> {
-  if (chunks.length === 0) return []
-  const queryTokens = tokenize(query)
-  const queryVec = buildTfIdf(queryTokens)
+export function searchKnowledge(
+  query: string,
+  topK = 3
+): Array<{ text: string; docName: string; score: number }> {
+  const rows = getDb()
+    .prepare('SELECT * FROM knowledge_chunks')
+    .all() as ChunkRow[]
 
-  const scored = chunks.map(chunk => ({
+  if (rows.length === 0) return []
+
+  const queryVec = buildTfIdf(tokenize(query))
+
+  const scored = rows.map(chunk => ({
     text: chunk.text,
-    docName: chunk.docName,
-    score: cosineSimilarity(queryVec, chunk.tfIdf),
+    docName: chunk.doc_name,
+    score: cosineSimilarity(queryVec, JSON.parse(chunk.tfidf_json)),
   }))
 
   return scored
@@ -95,13 +112,29 @@ export function searchKnowledge(query: string, topK = 3): Array<{ text: string; 
 }
 
 export function getDocuments(): KnowledgeDocument[] {
-  return [...documents]
+  const rows = getDb()
+    .prepare('SELECT * FROM knowledge_documents ORDER BY uploaded_at DESC')
+    .all() as Array<{
+      id: string
+      name: string
+      content_pseudonymized: string
+      size: number
+      chunks: number
+      uploaded_at: string
+    }>
+
+  return rows.map(row => ({
+    id: row.id,
+    name: row.name,
+    content: row.content_pseudonymized,
+    size: row.size,
+    uploadedAt: new Date(row.uploaded_at),
+    chunks: row.chunks,
+  }))
 }
 
 export function removeDocument(id: string): void {
-  const idx = documents.findIndex(d => d.id === id)
-  if (idx !== -1) documents.splice(idx, 1)
-  for (let i = chunks.length - 1; i >= 0; i--) {
-    if (chunks[i].docId === id) chunks.splice(i, 1)
-  }
+  const db = getDb()
+  db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(id)
+  db.prepare('DELETE FROM knowledge_documents WHERE id = ?').run(id)
 }

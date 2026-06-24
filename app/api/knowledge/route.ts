@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { addDocument, getDocuments, removeDocument } from '@/lib/vector-store'
-import { pseudonymize } from '@/lib/pseudonymize'
+import { pseudonymizeText } from '@/lib/pseudo-service'
 import { v4 as uuidv4 } from 'uuid'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 export async function GET() {
   return NextResponse.json({ documents: getDocuments() })
@@ -43,9 +44,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Kein Text im Dokument gefunden.' }, { status: 400 })
   }
 
-  const { pseudonymized } = pseudonymize(content)
-  const doc = addDocument(uuidv4(), name, pseudonymized)
-  return NextResponse.json({ document: doc })
+  try {
+    const { pseudonymized } = await pseudonymizeText(content, { enabled: true })
+    const doc = addDocument(uuidv4(), name, pseudonymized)
+    return NextResponse.json({ document: doc })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Pseudonymisierung fehlgeschlagen'
+    return NextResponse.json({ error: message }, { status: 503 })
+  }
 }
 
 export async function DELETE(req: NextRequest) {

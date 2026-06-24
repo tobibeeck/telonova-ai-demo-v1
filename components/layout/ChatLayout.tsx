@@ -1,16 +1,19 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import Sidebar from '@/components/sidebar/Sidebar'
 import ChatInterface from '@/components/chat/ChatInterface'
 import type { Conversation, Message, ModelId, PseudonymizationResult } from '@/lib/types'
 import { MODELS } from '@/lib/types'
+import type { UseCaseOption } from '@/components/chat/UseCaseSelector'
 
 export default function ChatLayout() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [selectedModel, setSelectedModel] = useState<ModelId>('gpt4')
+  const [selectedUseCase, setSelectedUseCase] = useState('allgemein')
+  const [useCases, setUseCases] = useState<UseCaseOption[]>([])
   const [useKnowledge, setUseKnowledge] = useState(false)
   const [pseudoEnabled, setPseudoEnabled] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
@@ -19,48 +22,72 @@ export default function ChatLayout() {
   const [isPseudoAnalyzing, setIsPseudoAnalyzing] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [chatError, setChatError] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/conversations').then(r => r.json()),
+      fetch('/api/prompts').then(r => r.json()),
+    ]).then(([convData, promptData]) => {
+      const parsed = (convData.conversations || []).map((c: Conversation) => ({
+        ...c,
+        createdAt: new Date(c.createdAt),
+        messages: c.messages.map((m: Message) => ({
+          ...m,
+          timestamp: new Date(m.timestamp),
+        })),
+      }))
+      setConversations(parsed)
+      setUseCases(promptData.useCases || [])
+      setLoaded(true)
+    }).catch(() => setLoaded(true))
+  }, [])
 
   const currentConversation = conversations.find(c => c.id === currentId) ?? null
 
-  const newConversation = useCallback(() => {
-    const id = uuidv4()
-    const conv: Conversation = {
-      id,
-      title: 'Neues Gespräch',
-      messages: [],
-      createdAt: new Date(),
-      model: selectedModel,
+  useEffect(() => {
+    if (currentConversation?.useCase) {
+      setSelectedUseCase(currentConversation.useCase)
     }
+    if (currentConversation?.model) {
+      setSelectedModel(currentConversation.model)
+    }
+  }, [currentId, currentConversation?.useCase, currentConversation?.model])
+
+  const newConversation = useCallback(async () => {
+    const res = await fetch('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: selectedModel, useCase: selectedUseCase }),
+    })
+    const data = await res.json()
+    const conv = data.conversation as Conversation
     setConversations(prev => [conv, ...prev])
-    setCurrentId(id)
+    setCurrentId(conv.id)
     setLastPseudo(null)
     setStreamingContent('')
-  }, [selectedModel])
+    setChatError(null)
+  }, [selectedModel, selectedUseCase])
 
   const sendMessage = useCallback(async (content: string) => {
     let convId = currentId
     let conv = conversations.find(c => c.id === convId)
 
     if (!convId || !conv) {
-      convId = uuidv4()
-      conv = {
-        id: convId,
-        title: content.slice(0, 40) + (content.length > 40 ? '…' : ''),
-        messages: [],
-        createdAt: new Date(),
-        model: selectedModel,
-      }
+      const res = await fetch('/api/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: selectedModel,
+          useCase: selectedUseCase,
+          title: content.slice(0, 40) + (content.length > 40 ? '…' : ''),
+        }),
+      })
+      const data = await res.json()
+      conv = data.conversation as Conversation
+      convId = conv.id
       setConversations(prev => [conv!, ...prev])
       setCurrentId(convId)
-    } else if (conv.messages.length === 0) {
-      // Update title from first message
-      setConversations(prev =>
-        prev.map(c =>
-          c.id === convId
-            ? { ...c, title: content.slice(0, 40) + (content.length > 40 ? '…' : '') }
-            : c
-        )
-      )
     }
 
     const userMessage: Message = {
@@ -70,7 +97,6 @@ export default function ChatLayout() {
       timestamp: new Date(),
     }
 
-    // Add user message
     const updatedConv = { ...conv, messages: [...conv.messages, userMessage] }
     setConversations(prev => prev.map(c => (c.id === convId ? updatedConv : c)))
 
@@ -79,11 +105,8 @@ export default function ChatLayout() {
     setLastPseudo(null)
     setChatError(null)
 
-    // Show pseudo analyzing state
     if (pseudoEnabled) {
       setIsPseudoAnalyzing(true)
-      await new Promise(r => setTimeout(r, 800 + Math.random() * 600))
-      setIsPseudoAnalyzing(false)
     }
 
     try {
@@ -99,6 +122,9 @@ export default function ChatLayout() {
           messages: apiMessages,
           model: selectedModel,
           useKnowledge,
+          pseudoEnabled,
+          useCase: selectedUseCase,
+          conversationId: convId,
         }),
       })
 
@@ -108,6 +134,9 @@ export default function ChatLayout() {
       const decoder = new TextDecoder()
       let buffer = ''
       let accumulated = ''
+      let pseudoData: PseudonymizationResult | null = null
+      let returnedConvId = convId
+      let assistantContent = ''
 
       while (true) {
         const { done, value } = await reader.read()
@@ -123,49 +152,121 @@ export default function ChatLayout() {
           try {
             const event = JSON.parse(data)
             if (event.type === 'pseudo') {
+              pseudoData = event.data
               setLastPseudo(event.data)
+              setIsPseudoAnalyzing(false)
+              if (event.conversationId) returnedConvId = event.conversationId
+              setConversations(prev =>
+                prev.map(c => {
+                  if (c.id !== (event.conversationId || convId)) return c
+                  const msgs = c.messages.map(m =>
+                    m.id === userMessage.id
+                      ? {
+                          ...m,
+                          replacements: event.data.replacements,
+                          contentSent: event.data.pseudonymized,
+                          pseudonymized: event.data.replacements.length > 0,
+                          replacementsCount: event.data.replacements.length,
+                        }
+                      : m
+                  )
+                  return { ...c, messages: msgs }
+                })
+              )
             } else if (event.type === 'token') {
               accumulated += event.data
               setStreamingContent(accumulated)
             } else if (event.type === 'error') {
               setChatError(event.message || 'Unbekannter Fehler')
             } else if (event.type === 'done') {
-              // finalize
+              if (event.conversationId) returnedConvId = event.conversationId
+              if (event.assistantContent) assistantContent = event.assistantContent
             }
           } catch {
-            // ignore
+            // ignore parse errors
           }
         }
       }
 
+      setIsPseudoAnalyzing(false)
+
       if (!accumulated) return
 
-      // Save assistant message
       const model = MODELS.find(m => m.id === selectedModel)!
       const assistantMessage: Message = {
         id: uuidv4(),
         role: 'assistant',
-        content: accumulated,
+        content: assistantContent || accumulated,
+        contentOriginal: accumulated,
+        contentSent: accumulated,
+        replacements: pseudoData?.replacements,
         model: selectedModel,
         timestamp: new Date(),
-        pseudonymized: pseudoEnabled && (lastPseudo?.replacements?.length || 0) > 0,
-        replacementsCount: lastPseudo?.replacements?.length || 0,
+        pseudonymized: pseudoEnabled && (pseudoData?.replacements?.length || 0) > 0,
+        replacementsCount: pseudoData?.replacements?.length || 0,
       }
 
       setConversations(prev =>
         prev.map(c =>
-          c.id === convId
-            ? { ...c, messages: [...c.messages, assistantMessage] }
+          c.id === returnedConvId
+            ? {
+                ...c,
+                useCase: selectedUseCase,
+                model: selectedModel,
+                messages: [...c.messages, assistantMessage],
+              }
             : c
         )
       )
+
+      if (returnedConvId !== convId) {
+        setCurrentId(returnedConvId)
+      }
     } catch (err) {
+      setIsPseudoAnalyzing(false)
       setChatError(err instanceof Error ? err.message : 'Verbindungsfehler')
     } finally {
       setIsLoading(false)
       setStreamingContent('')
     }
-  }, [currentId, conversations, selectedModel, useKnowledge, pseudoEnabled, lastPseudo])
+  }, [currentId, conversations, selectedModel, selectedUseCase, useKnowledge, pseudoEnabled])
+
+  const handleUseCaseChange = useCallback((useCase: string) => {
+    setSelectedUseCase(useCase)
+    if (currentId) {
+      fetch('/api/conversations', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: currentId, useCase }),
+      })
+      setConversations(prev =>
+        prev.map(c => (c.id === currentId ? { ...c, useCase } : c))
+      )
+    }
+  }, [currentId])
+
+  const handleDeleteConversation = useCallback(async (id: string) => {
+    await fetch('/api/conversations', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
+    setConversations(prev => prev.filter(c => c.id !== id))
+    if (currentId === id) {
+      setCurrentId(null)
+      setLastPseudo(null)
+      setStreamingContent('')
+      setChatError(null)
+    }
+  }, [currentId])
+
+  if (!loaded) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-main text-gray-400">
+        Lade…
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-main">
@@ -176,6 +277,7 @@ export default function ChatLayout() {
         currentId={currentId}
         onSelectConversation={setCurrentId}
         onNewConversation={newConversation}
+        onDeleteConversation={handleDeleteConversation}
         useKnowledge={useKnowledge}
         onToggleKnowledge={setUseKnowledge}
       />
@@ -183,6 +285,9 @@ export default function ChatLayout() {
         conversation={currentConversation}
         selectedModel={selectedModel}
         onSelectModel={setSelectedModel}
+        selectedUseCase={selectedUseCase}
+        useCases={useCases}
+        onSelectUseCase={handleUseCaseChange}
         onSendMessage={sendMessage}
         isLoading={isLoading}
         streamingContent={streamingContent}

@@ -32,30 +32,20 @@ export default function ModelSelector({ selected, onChange }: Props) {
       >
         <ModelDot model={selected} />
         <span className="text-sm font-semibold text-white">{selectedModel.name}</span>
-        <span className="text-xs text-gray-400 bg-white/10 px-1.5 py-0.5 rounded-md">{selectedModel.badge}</span>
         <ChevronDown className={cn('w-3.5 h-3.5 text-gray-400 transition-transform', open && 'rotate-180')} />
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-1 w-72 bg-[#2f2f2f] rounded-xl border border-border shadow-xl z-50 overflow-hidden">
+        <div className="absolute top-full left-0 mt-1 w-56 bg-[#2f2f2f] rounded-xl border border-border shadow-xl z-50 overflow-hidden">
           <div className="p-1">
             {MODELS.map(model => (
               <button
                 key={model.id}
                 onClick={() => { onChange(model.id); setOpen(false) }}
-                className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-white/10 transition-colors text-left group"
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/10 transition-colors text-left"
               >
                 <ModelDot model={model.id} size="lg" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-white">{model.name}</span>
-                    <span className="text-xs text-gray-500 bg-white/10 px-1.5 py-0.5 rounded">{model.badge}</span>
-                  </div>
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-model-gpt" />
-                    <span className="text-xs text-gray-500">EU-Datenschutz konform</span>
-                  </div>
-                </div>
+                <span className="text-sm font-medium text-white flex-1">{model.name}</span>
                 {selected === model.id && <Check className="w-4 h-4 text-model-gpt" />}
               </button>
             ))}
