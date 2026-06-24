@@ -99,6 +99,8 @@ def main() -> int:
     run(client, f"{SUDO} chown -R {USER}:{USER} {REMOTE_DIR} || true")
     run(client, f"{SUDO} usermod -aG docker {USER} || true")
     run(client, f"mkdir -p {REMOTE_DIR}/data")
+    run(client, f"{SUDO} chown -R 1001:1001 {REMOTE_DIR}/data")
+    run(client, f"{SUDO} chmod -R u+rwX,g+rwX {REMOTE_DIR}/data")
 
     prod_compose = root / "docker-compose.prod.yml"
     if prod_compose.exists():

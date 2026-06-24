@@ -19,6 +19,10 @@ if [[ ! -f .env.local ]]; then
   exit 1
 fi
 
+sudo mkdir -p data
+sudo chown -R 1001:1001 data
+sudo chmod -R u+rwX,g+rwX data
+
 if [[ ! -f data/gcp-service-account.json ]]; then
   echo "WARNING: data/gcp-service-account.json missing – Gemini will not work."
 fi
