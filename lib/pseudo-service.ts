@@ -15,30 +15,43 @@ interface LlmResponse {
 }
 
 const SYSTEM_PROMPT = `Du bist ein präziser NER-Extraktor für deutsche Texte nach DSGVO.
-Extrahiere NUR echte personenbezogene oder sensible Daten – keine normalen Wörter.
+Extrahiere personenbezogene und sensible Daten als einzelne Entity-Texte – nie ganze Sätze.
 
-Erlaubt:
-- PERSON: konkrete Namen natürlicher Personen (z.B. "Max Mustermann", "Dr. Anna Schmidt")
+Entity-Typen:
+- PERSON: konkrete Namen natürlicher Personen (Vor- und/oder Nachname)
 - EMAIL, TELEFON, IBAN, ADRESSE, DATUM, ORG (Firmen mit Rechtsform)
 
-Strikt NICHT markieren:
-- Begrüßungen und Smalltalk: "Hallo", "Servus", "Moin", "Guten Tag"
-- Fragen ohne Namen: "Wer bist du?", "Wie geht es dir?", "Was kannst du?"
-- Pronomen und Anreden: du, dir, dich, dein, Sie, Ihnen, Herr, Frau (ohne folgenden Namen)
-- Alltagswörter, Verben, Artikel, Füllwörter
-- Ganze Sätze oder Satzteile – nur das konkrete Datum/Name/Email/etc.
+WICHTIG bei PERSON:
+- Namen IMMER extrahieren, auch wenn der Satz mit "Hallo", "Servus" o.ä. beginnt
+- Nur den Namen markieren, nicht "Hallo", "ich", "bin", "heiße"
+- Beispiele:
+  - "Hallo ich bin Tobias Beeck" → {"entities":[{"text":"Tobias Beeck","type":"PERSON"}]}
+  - "Mein Name ist Anna Schmidt" → {"entities":[{"text":"Anna Schmidt","type":"PERSON"}]}
+  - "Ich heiße Dr. Max Mustermann" → {"entities":[{"text":"Dr. Max Mustermann","type":"PERSON"}]}
 
-Beispiele (entities = []):
+Keine Entities (leeres Array):
 - "Hallo, wer bist du?" → []
 - "Servus" → []
 - "Wie kann ich helfen?" → []
 
-Beispiel mit Entity:
+Weitere Beispiele:
 - "Termin mit Max Mustermann am 12.03.2025" → PERSON: "Max Mustermann", DATUM: "12.03.2025"
 
 Antwote NUR mit validem JSON:
 {"entities":[{"text":"...","type":"PERSON|DATUM|TELEFON|EMAIL|IBAN|ADRESSE|ORG"}]}
 Leeres Array wenn nichts gefunden. Keine Erklärungen.`
+
+const RETRY_SYSTEM_PROMPT = `Du extrahierst NUR Personennamen aus deutschen Texten.
+Antwote NUR mit JSON: {"entities":[{"text":"...","type":"PERSON"}]}
+
+Regeln:
+- Vor- und Nachname zusammen als eine Entity (z.B. "Tobias Beeck")
+- Auch nach: ich bin, ich heiße, mein Name ist, nennen Sie mich
+- Titel mit Name erlaubt: Dr. Anna Schmidt
+- Keine Begrüßungen, keine Verben, keine Pronomen als Entity
+- Leeres Array nur wenn wirklich kein Personenname vorkommt`
+
+const RETRY_MAX_TEXT_LENGTH = 500
 
 const BLOCKED_TERMS = new Set([
   'du', 'dir', 'dich', 'dein', 'deine', 'deiner', 'deinem', 'deinen', 'deines',
@@ -65,8 +78,8 @@ function cleanToken(word: string): string {
 
 function looksLikePersonName(text: string): boolean {
   const trimmed = text.trim()
-  if (!trimmed || GREETING_OR_QUESTION.test(trimmed)) return false
-  if (/[?!]/.test(trimmed)) return false
+  if (!trimmed) return false
+  if (GREETING_OR_QUESTION.test(trimmed)) return false
 
   const words = trimmed.split(/\s+/).filter(Boolean)
   if (words.every(w => BLOCKED_TERMS.has(cleanToken(w)))) return false
@@ -80,8 +93,14 @@ function looksLikePersonName(text: string): boolean {
   })
 
   if (nameTokens.length === 0) return false
+
+  const greetingOnly =
+    words.length <= 3 &&
+    words.every(w => BLOCKED_TERMS.has(cleanToken(w)) || /^(hallo|servus|moin|hi|hey)$/i.test(cleanToken(w)))
+  if (greetingOnly) return false
+
   if (words.length === 1) return nameTokens.length === 1
-  return nameTokens.length >= 1 && words.length <= 6
+  return nameTokens.length >= 1 && words.length <= 8
 }
 
 function shouldSkipEntity(text: string, type: PseudoReplacement['type']): boolean {
@@ -149,6 +168,40 @@ function applyReplacements(text: string, entities: LlmEntity[]): Pseudonymizatio
   return { original: text, pseudonymized: result, replacements: unique }
 }
 
+function mergeEntities(primary: LlmEntity[], secondary: LlmEntity[]): LlmEntity[] {
+  const seen = new Set<string>()
+  const merged: LlmEntity[] = []
+  for (const entity of [...primary, ...secondary]) {
+    if (!entity.text?.trim()) continue
+    const key = `${entity.type}:${entity.text.trim()}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(entity)
+  }
+  return merged
+}
+
+async function extractEntities(text: string): Promise<LlmEntity[]> {
+  const prompt = `Extrahiere personenbezogene/sensible Daten (Namen, E-Mail, Telefon, IBAN, Adresse, Datum, Firma).
+Personennamen auch in Sätzen wie "Hallo ich bin …", "Mein Name ist …", "Ich heiße …" – nur den Namen, nicht die Begrüßung.
+Nur einzelne Entity-Texte, keine ganzen Sätze.
+
+Text:\n\n${text}`
+
+  const llmResult = await generateJson<LlmResponse>(prompt, SYSTEM_PROMPT)
+  let entities = llmResult.entities || []
+
+  if (entities.length === 0 && text.length <= RETRY_MAX_TEXT_LENGTH) {
+    const retryResult = await generateJson<LlmResponse>(
+      `Welche Personennamen (Vor- und Nachname) stehen in diesem Text? Auch nach "ich bin", "ich heiße", "mein Name ist".\n\n${text}`,
+      RETRY_SYSTEM_PROMPT
+    )
+    entities = mergeEntities(entities, retryResult.entities || [])
+  }
+
+  return entities
+}
+
 export async function pseudonymizeText(
   text: string,
   options: { enabled?: boolean } = {}
@@ -170,14 +223,7 @@ export async function pseudonymizeText(
     )
   }
 
-  const prompt = `Extrahiere NUR echte personenbezogene/sensible Daten (Namen, E-Mail, Telefon, IBAN, Adresse, Datum, Firma).
-Keine Begrüßungen, keine Fragen, keine Pronomen wie "du"/"dir"/"wer bist du".
-Markiere niemals ganze Sätze – nur das konkrete Stück (z.B. nur "Max Mustermann", nicht den ganzen Satz).
-
-Text:\n\n${text}`
-  const llmResult = await generateJson<LlmResponse>(prompt, SYSTEM_PROMPT)
-  const entities = llmResult.entities || []
-
+  const entities = await extractEntities(text)
   return applyReplacements(text, entities)
 }
 
